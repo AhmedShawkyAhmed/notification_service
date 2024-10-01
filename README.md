@@ -9,5 +9,5 @@
 2.  Initialization:
 
 ```dart
-NotificationService.init();
+NotificationService.init(FirebaseObtions);
 ```
