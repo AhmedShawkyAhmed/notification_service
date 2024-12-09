@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:math';
-import 'dart:ui';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:core_utils/core_utils.dart';
@@ -10,24 +9,24 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_service/permission_service.dart';
 
 class NotificationService {
-  static final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+      FlutterLocalNotificationsPlugin();
 
   static Future<void> Function(String?)? onNotificationClickAction;
 
-  static final NotificationService _notificationService = NotificationService._internal();
+  static final NotificationService _notificationService =
+      NotificationService._internal();
 
   factory NotificationService() {
     return _notificationService;
   }
 
   NotificationService._internal();
-  static Color? backgroundIconColor;
+
   static Future<void> init({
     required FirebaseOptions options,
     required Future<void> Function(String?) onClickAction,
-    required Color? color,
   }) async {
-    backgroundIconColor = color;
     onNotificationClickAction = onClickAction;
     await Firebase.initializeApp(
       options: options,
@@ -37,14 +36,17 @@ class NotificationService {
         Permission.notification.request();
       }
     });
-    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+    await FirebaseMessaging.instance
+        .setForegroundNotificationPresentationOptions(
       alert: true,
       badge: true,
       sound: true,
     );
-    const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings("app_icon");
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings("app_icon");
 
-    DarwinInitializationSettings initializationSettingsIOS = DarwinInitializationSettings(
+    DarwinInitializationSettings initializationSettingsIOS =
+        DarwinInitializationSettings(
       requestSoundPermission: true,
       requestBadgePermission: true,
       requestAlertPermission: true,
@@ -64,14 +66,15 @@ class NotificationService {
     await flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
       onDidReceiveNotificationResponse: onDidReceiveNotificationResponse,
-      onDidReceiveBackgroundNotificationResponse: onDidReceiveNotificationResponse,
+      onDidReceiveBackgroundNotificationResponse:
+          onDidReceiveNotificationResponse,
     );
     flutterLocalNotificationsPlugin.cancelAll();
 
     FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
 
     FirebaseMessaging.onMessageOpenedApp.listen(
-          (RemoteMessage message) {
+      (RemoteMessage message) {
         AppLogs.debugLog(
           'Message Opened App: ${message.data}',
           runtimeType: FirebaseMessaging,
@@ -100,8 +103,8 @@ class NotificationService {
   }
 
   static Future<void> firebaseBackgroundHandler(
-      RemoteMessage message,
-      ) async {
+    RemoteMessage message,
+  ) async {
     AppLogs.responseLog('Notification ${message.notification?.toMap()}');
     if (Platform.isAndroid) {
       NotificationService.showNotification(
@@ -120,7 +123,9 @@ class NotificationService {
   }
 
   static Future<void> onInitState() async {
-    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+    FirebaseMessaging.instance
+        .getInitialMessage()
+        .then((RemoteMessage? message) {
       if (message != null) {
         AppLogs.debugLog(
           'GetInitialMessage: ${message.data}',
@@ -149,7 +154,8 @@ class NotificationService {
     });
   }
 
-  static Future onDidReceiveNotificationResponse(NotificationResponse response) async {
+  static Future onDidReceiveNotificationResponse(
+      NotificationResponse response) async {
     var payload = response.payload;
     AppLogs.responseLog("payload $payload");
     if (payload != null) {
@@ -186,7 +192,8 @@ class NotificationService {
   }) async {
     BigPictureStyleInformation? bigPictureStyleInformation;
     if (imageUrl != null && imageUrl != "") {
-      final String largeIconPath = await _downloadAndSaveImage(imageUrl, 'largeIcon');
+      final String largeIconPath =
+          await _downloadAndSaveImage(imageUrl, 'largeIcon');
 
       bigPictureStyleInformation = BigPictureStyleInformation(
         FilePathAndroidBitmap(largeIconPath),
@@ -195,7 +202,8 @@ class NotificationService {
         summaryText: body,
       );
     }
-    AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+    AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
       '${Random().nextInt(1000)}',
       'App Notification',
       channelDescription: 'App Notification',
@@ -209,12 +217,12 @@ class NotificationService {
       progress: progress,
       maxProgress: maxProgress,
       onlyAlertOnce: true,
-      icon: "app_icon",
-      color: backgroundIconColor,
+      icon: "@mipmap/ic_launcher",
       number: badgeCount,
     );
 
-    DarwinNotificationDetails iosPlatformChannelSpecifics = DarwinNotificationDetails(
+    DarwinNotificationDetails iosPlatformChannelSpecifics =
+        DarwinNotificationDetails(
       threadIdentifier: '12345',
       badgeNumber: badgeCount,
     );
@@ -238,9 +246,9 @@ class NotificationService {
   }
 
   static Future<String> _downloadAndSaveImage(
-      String url,
-      String fileName,
-      ) async {
+    String url,
+    String fileName,
+  ) async {
     final Directory directory = await getApplicationDocumentsDirectory();
     final String filePath = '${directory.path}/$fileName';
     final http.Response response = await http.get(Uri.parse(url));
