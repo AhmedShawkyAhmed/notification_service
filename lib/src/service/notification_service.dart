@@ -43,7 +43,7 @@ class NotificationService {
       sound: true,
     );
     const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings("app_icon");
+        AndroidInitializationSettings("@mipmap/ic_launcher");
 
     DarwinInitializationSettings initializationSettingsIOS =
         DarwinInitializationSettings(
