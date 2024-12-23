@@ -19,9 +19,11 @@ dependencies:
   core_utils:
     git:
       url: https://github.com/AhmedShawkyAhmed/core_utils.git
+      ref: main
   permission_service:
     git:
       url: https://github.com/AhmedShawkyAhmed/permission_service.git
+      ref: main
 
 dev_dependencies:
   flutter_test:
