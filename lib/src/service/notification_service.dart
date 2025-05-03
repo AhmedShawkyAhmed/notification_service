@@ -1,259 +1,209 @@
 import 'dart:io';
 import 'dart:math';
-import 'package:path_provider/path_provider.dart';
-import 'package:http/http.dart' as http;
+import 'dart:ui';
 import 'package:core_utils/core_utils.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http;
 import 'package:permission_service/permission_service.dart';
 
 class NotificationService {
-  static final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
+  static Future<void> Function(String?)? _onNotificationClickAction;
+  static final NotificationService _instance = NotificationService._internal();
 
-  static Future<void> Function(String?)? onNotificationClickAction;
-
-  static final NotificationService _notificationService =
-      NotificationService._internal();
-
-  factory NotificationService() {
-    return _notificationService;
-  }
+  factory NotificationService() => _instance;
 
   NotificationService._internal();
+
+  static Color? _backgroundIconColor;
 
   static Future<void> init({
     required FirebaseOptions options,
     required Future<void> Function(String?) onClickAction,
+    required Color? color,
   }) async {
-    onNotificationClickAction = onClickAction;
-    await Firebase.initializeApp(
-      options: options,
-    );
-    await Permission.notification.isDenied.then((value) {
-      if (value) {
-        Permission.notification.request();
-      }
-    });
-    await FirebaseMessaging.instance
-        .setForegroundNotificationPresentationOptions(
+    _backgroundIconColor = color;
+    _onNotificationClickAction = onClickAction;
+
+    AppLogs.debugLog("Initializing Firebase...");
+    await Firebase.initializeApp(options: options);
+
+    if (await Permission.notification.isDenied) {
+      AppLogs.debugLog("Requesting notification permissions...");
+      await Permission.notification.request();
+    }
+
+    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
       alert: true,
       badge: true,
       sound: true,
     );
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings("@mipmap/ic_launcher");
 
-    DarwinInitializationSettings initializationSettingsIOS =
-        DarwinInitializationSettings(
+    const AndroidInitializationSettings androidSettings = AndroidInitializationSettings("app_icon");
+
+    final DarwinInitializationSettings iosSettings = DarwinInitializationSettings(
       requestSoundPermission: true,
       requestBadgePermission: true,
       requestAlertPermission: true,
-      onDidReceiveLocalNotification: (id, title, body, payload) {
-        _notificationClicked(
-          payload,
-        );
-      },
     );
 
-    InitializationSettings initializationSettings = InitializationSettings(
-      android: initializationSettingsAndroid,
-      iOS: initializationSettingsIOS,
-      macOS: null,
+    final InitializationSettings initSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: iosSettings,
     );
 
-    await flutterLocalNotificationsPlugin.initialize(
-      initializationSettings,
-      onDidReceiveNotificationResponse: onDidReceiveNotificationResponse,
-      onDidReceiveBackgroundNotificationResponse:
-          onDidReceiveNotificationResponse,
-    );
-    flutterLocalNotificationsPlugin.cancelAll();
-
-    FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
-
-    FirebaseMessaging.onMessageOpenedApp.listen(
-      (RemoteMessage message) {
-        AppLogs.debugLog(
-          'Message Opened App: ${message.data}',
-          runtimeType: FirebaseMessaging,
-        );
-        _notificationClicked(message.data['payload']);
-      },
+    await _notificationsPlugin.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: _onDidReceiveNotificationResponse,
     );
 
-    await onInitState();
+    _notificationsPlugin.cancelAll();
+    AppLogs.debugLog("All previous notifications cleared.");
+
+    FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+    FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageOpenedApp);
+
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      if(Platform.isAndroid){
+        AppLogs.debugLog("Foreground Notification: ${message.notification?.title}");
+        _showNotification(message,isForeGround: true);
+      }
+    });
+
+    await _checkInitialMessage();
   }
 
   static Future<String?> getFCMToken() async {
-    String? fcmToken = await FirebaseMessaging.instance.getToken();
-    AppLogs.debugLog("FCM ${fcmToken.toString()}");
-    return fcmToken;
+    String? token = await FirebaseMessaging.instance.getToken();
+    AppLogs.debugLog("FCM Token: $token");
+    return token;
   }
 
-  static void subscribeToTopics({
-    required List<String> topics,
-  }) {
+  static void subscribeToTopics(List<String> topics) {
     for (String topic in topics) {
       FirebaseMessaging.instance.subscribeToTopic(topic).then((_) {
-        AppLogs.debugLog("Subscribe To Topic $topic");
+        AppLogs.debugLog("Subscribed to topic: $topic");
       });
     }
   }
 
-  static Future<void> firebaseBackgroundHandler(
-    RemoteMessage message,
-  ) async {
-    AppLogs.responseLog('Notification ${message.notification?.toMap()}');
-    if (Platform.isAndroid) {
-      NotificationService.showNotification(
-        id: Random().nextInt(100000),
-        showProgress: false,
-        title: message.notification?.title ?? "",
-        body: message.notification?.body ?? "",
-        imageUrl: message.notification?.android?.imageUrl,
-        autoCancel: true,
-        importance: Importance.max,
-        priority: Priority.high,
-        ongoing: false,
-        badgeCount: 0,
-      );
+  static Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
+    AppLogs.responseLog("Background Notification: ${message.notification?.title}");
+    _showNotification(message);
+  }
+
+  static Future<void> _checkInitialMessage() async {
+    RemoteMessage? message = await FirebaseMessaging.instance.getInitialMessage();
+    if (message != null) {
+      AppLogs.debugLog("Initial notification received: ${message.notification?.title}");
+      _handleMessageOpenedApp(message);
     }
   }
 
-  static Future<void> onInitState() async {
-    FirebaseMessaging.instance
-        .getInitialMessage()
-        .then((RemoteMessage? message) {
-      if (message != null) {
-        AppLogs.debugLog(
-          'GetInitialMessage: ${message.data}',
-          runtimeType: FirebaseMessaging,
-        );
-        _notificationClicked(message.data['payload']);
-      }
-    });
-
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      AppLogs.responseLog('Notification ${message.notification?.toMap()}');
-      if (Platform.isAndroid) {
-        showNotification(
-          id: Random().nextInt(100000),
-          showProgress: false,
-          title: message.notification?.title ?? "",
-          body: message.notification?.body ?? "",
-          imageUrl: message.notification?.android?.imageUrl,
-          autoCancel: true,
-          importance: Importance.defaultImportance,
-          priority: Priority.defaultPriority,
-          ongoing: false,
-          badgeCount: 0,
-        );
-      }
-    });
-  }
-
-  static Future onDidReceiveNotificationResponse(
-      NotificationResponse response) async {
-    var payload = response.payload;
-    AppLogs.responseLog("payload $payload");
-    if (payload != null) {
-      _notificationClicked(response.payload);
+  static void _handleMessageOpenedApp(RemoteMessage message) {
+    AppLogs.debugLog("Notification clicked from app open: ${message.notification?.title}");
+    if (message.data.containsKey('payload')) {
+      _onNotificationClick(message.data['payload']);
     }
   }
 
-  static Future<void> onNotificationClick(String? payload) async {
-    if (onNotificationClickAction != null) {
-      await onNotificationClickAction!(payload);
+  static Future<void> _showNotification(RemoteMessage message,{bool isForeGround = false}) async {
+    final notification = message.notification;
+    if (notification == null) return;
+
+    if(notification.title != null && Platform.isAndroid && !isForeGround){
+      AppLogs.debugLog("Skipping Android Notification");
+      return;
+    }
+
+    AppLogs.debugLog("Showing notification: ${notification.title}");
+
+    _displayNotification(
+      title: notification.title ?? "Notification",
+      body: notification.body ?? "You have a new message.",
+      imageUrl: message.notification?.android?.imageUrl,
+    );
+  }
+
+  static Future<void> _onDidReceiveNotificationResponse(NotificationResponse response) async {
+    AppLogs.debugLog("Notification clicked with payload: ${response.payload}");
+    _onNotificationClick(response.payload);
+  }
+
+  static Future<void> _onNotificationClick(String? payload) async {
+    if (_onNotificationClickAction != null) {
+      AppLogs.debugLog("Executing notification click action with payload: $payload");
+      await _onNotificationClickAction!(payload);
     } else {
-      AppLogs.debugLog("No action defined for notification click");
+      AppLogs.debugLog("No action defined for notification click.");
     }
   }
 
-  static Future<void> _notificationClicked(String? payload) async {
-    await onNotificationClick(payload);
-  }
-
-  static Future<void> showNotification({
-    int progress = 0,
-    int maxProgress = 0,
+  static Future<void> _displayNotification({
     int? id,
     String? title,
     String? body,
     String? imageUrl,
-    bool? showProgress,
-    Importance importance = Importance.max,
-    Priority priority = Priority.max,
-    bool ongoing = false,
-    String? payload,
-    int badgeCount = 0,
     bool autoCancel = false,
   }) async {
-    BigPictureStyleInformation? bigPictureStyleInformation;
-    if (imageUrl != null && imageUrl != "") {
-      final String largeIconPath =
-          await _downloadAndSaveImage(imageUrl, 'largeIcon');
-
-      bigPictureStyleInformation = BigPictureStyleInformation(
+    BigPictureStyleInformation? bigPictureStyle;
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      final String largeIconPath = await _downloadAndSaveImage(imageUrl, 'largeIcon');
+      bigPictureStyle = BigPictureStyleInformation(
         FilePathAndroidBitmap(largeIconPath),
         largeIcon: const DrawableResourceAndroidBitmap('app_icon'),
         contentTitle: title,
         summaryText: body,
       );
     }
-    AndroidNotificationDetails androidPlatformChannelSpecifics =
-        AndroidNotificationDetails(
+
+    final androidDetails = AndroidNotificationDetails(
       '${Random().nextInt(1000)}',
       'App Notification',
-      channelDescription: 'App Notification',
+      channelDescription: 'General Notifications',
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
       autoCancel: autoCancel,
-      showProgress: showProgress ?? true,
-      ongoing: ongoing,
-      styleInformation: bigPictureStyleInformation,
-      progress: progress,
-      maxProgress: maxProgress,
-      onlyAlertOnce: true,
-      icon: "@mipmap/ic_launcher",
-      number: badgeCount,
+      styleInformation: bigPictureStyle,
+      icon: "app_icon",
+      color: _backgroundIconColor,
     );
 
-    DarwinNotificationDetails iosPlatformChannelSpecifics =
-        DarwinNotificationDetails(
+    final iosDetails = const DarwinNotificationDetails(
       threadIdentifier: '12345',
-      badgeNumber: badgeCount,
     );
 
-    NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidPlatformChannelSpecifics,
-      iOS: iosPlatformChannelSpecifics,
+    final notificationDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
     );
 
-    await flutterLocalNotificationsPlugin.show(
+    await _notificationsPlugin.show(
       id ?? 12345,
-      title ?? "App",
-      body ?? "You have new Notification",
-      platformChannelSpecifics,
-      payload: payload,
+      title ?? "App Notification",
+      body ?? "You have a new notification.",
+      notificationDetails,
     );
+
+    AppLogs.debugLog("Notification displayed: $title");
   }
 
-  void cancelNotification({int? id}) {
-    flutterLocalNotificationsPlugin.cancel(id ?? 12345);
+  static void cancelNotification({int? id}) {
+    _notificationsPlugin.cancel(id ?? 12345);
+    AppLogs.debugLog("Notification canceled: ID ${id ?? 12345}");
   }
 
-  static Future<String> _downloadAndSaveImage(
-    String url,
-    String fileName,
-  ) async {
-    final Directory directory = await getApplicationDocumentsDirectory();
-    final String filePath = '${directory.path}/$fileName';
-    final http.Response response = await http.get(Uri.parse(url));
-    final File file = File(filePath);
+  static Future<String> _downloadAndSaveImage(String url, String fileName) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final filePath = '${directory.path}/$fileName';
+    final response = await http.get(Uri.parse(url));
+    final file = File(filePath);
     await file.writeAsBytes(response.bodyBytes);
+    AppLogs.debugLog("Downloaded image for notification: $filePath");
     return filePath;
   }
 }
