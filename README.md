@@ -4,7 +4,7 @@
 ```dart
   notification_service:
 git:
-url: https://source.intalio.com/etgs-qatar/shared_group/flutter_packages/notification_service_flutter.git
+url: https://github.com/AhmedShawkyAhmed/notification_service.git
 ref: main
 ```
 2. Permission:
